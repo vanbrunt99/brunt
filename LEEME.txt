@@ -1,0 +1,55 @@
+BRUNT 1.0 · tu app única para el iPhone
+================================================
+Reemplaza a Olympia (entreno y nutrición), BRUNTFIT Trainer (tus clientes), Cuatri (la universidad)
+y BruntVault (tus saldos, capturados a mano).
+
+QUÉ HAY EN ESTA CARPETA
+- index.html ............ Toda la app en un solo archivo.
+- sw.js ................. Guarda una copia para que abra sin internet. No guarda ni envía tus datos.
+- manifest.webmanifest .. Nombre, colores e íconos para instalarla.
+- apple-touch-icon.png, icon-192.png, icon-512.png, icon-maskable.png .. Íconos.
+- vendor/pdfjs/ ......... Lector de PDF (pdf.js de Mozilla). Se carga solo al abrir el PDF de un
+                          cliente o al leer un sílabo en PDF. Súbelo también.
+
+PUBLICARLA EN GITHUB PAGES (un repositorio NUEVO: no toques los de tus otras apps)
+1. Entra a github.com → «+» → New repository → nombre: brunt → Public → Create repository.
+2. «uploading an existing file» (o Add file → Upload files). Arrastra TODO el contenido de esta carpeta
+   (no la carpeta misma), incluida la carpeta vendor. Commit changes.
+3. Settings → Pages → Source: Deploy from a branch → Branch: main, carpeta / (root) → Save.
+   En 1 a 3 minutos queda en: https://vanbrunt99.github.io/brunt/
+
+INSTALARLA Y TRAER TUS DATOS
+4. En el iPhone, abre esa dirección en Safari → Compartir → «Agregar a pantalla de inicio».
+   Ábrela siempre desde el ícono: los datos de la app instalada son aparte de los de Safari.
+5. Saca un respaldo nuevo de cada app y guárdalo en Archivos:
+   - Olympia: Perfil → Respaldo (.json)
+   - BRUNTFIT Trainer: Ajustes → Exportar respaldo (.zip, con los PDF)
+   - Cuatri: Ajustes → Respaldo (.json)
+6. En Brunt: «Traer mis datos» (o Más → Traer datos de tus apps) → elige un respaldo. Brunt reconoce
+   de qué app es. Repite con los otros dos. Cada uno solo cambia lo suyo. Al final de cada uno revisa
+   el reporte; debe decir que todo es idéntico:
+   - Olympia: «35 de 35 idénticos al respaldo»
+   - Cuatri: «6 de 6 idénticos»
+   - BRUNTFIT: «8 de 8 idénticos» (4 conteos y tus 4 PDF)
+7. Finanzas: Más → Finanzas → crea tus sobres y escribe el saldo actual de cada uno.
+8. En Brunt: Más → Respaldo → Descargar respaldo. Es un solo .zip con todo, PDF incluidos.
+   Guárdalo en Archivos o iCloud Drive.
+
+IMPORTANTE
+- Tus otras apps no se modifican y pueden seguir instaladas. Lo que registres en una no aparece en
+  la otra: el día que te pases a Brunt, trae respaldos recientes ese mismo día.
+- Tus datos viven solo en tu iPhone. El repositorio es público, pero solo tiene el código.
+- El respaldo de Brunt NO va cifrado (decisión tuya): quien tenga el archivo puede leerlo.
+- El bloqueo (Más → Bloqueo) es opcional y viene apagado. Pide PIN o Face ID al abrir; no cifra
+  tus datos. No viaja en el respaldo. Si olvidas el PIN sin Face ID, la única salida es borrar los
+  datos de Brunt en el iPhone y restaurar tu respaldo.
+- Si borras la app de la pantalla de inicio, se borran sus datos. Descarga respaldos seguido
+  (la app te avisa si pasan más de 7 días).
+
+ACTUALIZAR A UNA VERSIÓN NUEVA
+- Sube los archivos nuevos encima en el mismo repositorio (no borres nada) y haz Commit.
+- Espera 2 o 3 minutos, cierra la app por completo y ábrela. En Más → Acerca de Brunt ves la versión.
+
+PROBARLA SIN TUS DATOS
+- En la primera pantalla, «Probar con datos de ejemplo». Lo primero que traigas reemplaza los datos
+  de ejemplo.
