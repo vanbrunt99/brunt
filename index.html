@@ -233,7 +233,7 @@ textarea.input { min-height: 9rem; resize: vertical; line-height: 1.4; font-fami
 
 /* ── Deslizar para eliminar: la fila sigue al dedo 1:1 ── */
 .swipe { position: relative; overflow: hidden; touch-action: pan-y; }
-.swipe > .row { will-change: transform; z-index: 1; }
+.swipe > .row { z-index: 1; }
 .swipe .del { position: absolute; inset: 0 0 0 auto; width: 100%; background: var(--red); color: #fff; font-weight: 600; display: flex; align-items: center; justify-content: flex-end; padding-right: 1.2rem; }
 
 /* ── Hojas que suben desde abajo ── */
@@ -504,6 +504,9 @@ svg.chev { width: 1.05rem; height: 1.05rem; flex: none; color: var(--label-3); }
 .chips.scroll{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin:0 -1rem .6rem;padding:0 1rem}
 .chips.scroll::-webkit-scrollbar{display:none}
 .chips.scroll .chip{flex:0 0 auto;white-space:nowrap}
+/* con una hoja abierta, la barra de pestañas queda bajo el velo: sin desenfoque (ahorra trabajo en cada cuadro de la animación y del scroll de la hoja) */
+body.lock .tabbar, body.lock .topbar { -webkit-backdrop-filter: none; backdrop-filter: none; background: #1c1c1e; }
+.row.dimmed .main { opacity: .5; transition: opacity .2s ease; }
 
 </style>
 </head>
@@ -2248,6 +2251,8 @@ var B = window.B || (window.B = {});
 (function () {
   var DB = 'brunt-app', STORE = 'kv', FILES = 'files', LSP = 'brunt:';
   var mem = {}, dirty = {}, db = null, mode = 'idb', timer = null, listeners = [], failed = false, writing = false;
+  var tracks = [];
+  function note(k) { for (var i = 0; i < tracks.length; i++) if (!Object.prototype.hasOwnProperty.call(tracks[i], k)) tracks[i][k] = Object.prototype.hasOwnProperty.call(mem, k) ? mem[k] : undefined; }
 
   function clone(v) {
     if (v === undefined || v === null || typeof v !== 'object') return v;
@@ -2262,10 +2267,15 @@ var B = window.B || (window.B = {});
     ro: function (k, d) { return Object.prototype.hasOwnProperty.call(mem, k) ? mem[k] : d; },
     has: function (k) { return Object.prototype.hasOwnProperty.call(mem, k); },
     set: function (k, v) {
+      note(k);
       if (v === null || v === undefined) { delete mem[k]; } else { mem[k] = clone(v); }
       dirty[k] = 1; schedule(); emit('change', k);
     },
-    del: function (k) { delete mem[k]; dirty[k] = 1; schedule(); emit('change', k); },
+    del: function (k) { note(k); delete mem[k]; dirty[k] = 1; schedule(); emit('change', k); },
+    /* para «deshacer»: anota cómo estaba cada llave justo antes de su primer cambio.
+       Como set() siempre guarda una copia nueva, el valor anterior queda intacto y no hay que copiar
+       nada de antemano (antes se copiaban tus planes y registros completos en cada cambio). */
+    track: function (box) { tracks.push(box); return function () { var i = tracks.indexOf(box); if (i >= 0) tracks.splice(i, 1); }; },
     keys: function () { return Object.keys(mem); },
     flush: flush,
     on: function (f) { listeners.push(f); },
@@ -2273,7 +2283,12 @@ var B = window.B || (window.B = {});
     failed: function () { return failed; }
   };
 
-  function schedule() { clearTimeout(timer); emit('pending'); timer = setTimeout(flush, 250); }
+  /* se escribe al disco un momento después del último cambio, fuera de las animaciones de las hojas (≈0,4 s);
+     y siempre al salir de la app, para no perder nada */
+  function schedule() { clearTimeout(timer); emit('pending'); timer = setTimeout(flush, 700); }
+  function bye() { if (Object.keys(dirty).length) flush(); }
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') bye(); });
+  window.addEventListener('pagehide', bye);
 
   function flush() {
     clearTimeout(timer);
@@ -2649,20 +2664,28 @@ var B = window.B || (window.B = {});
     head.addEventListener('pointerdown', pd); el.querySelector('.grab').addEventListener('pointerdown', pd);
     head.style.touchAction = 'none'; el.querySelector('.grab').style.touchAction = 'none';
 
-    /* desde el contenido: solo si está arriba del todo y el dedo baja */
-    var ty = null, pulling = false;
-    body.addEventListener('touchstart', function (e) { if (e.touches.length !== 1) return; ty = e.touches[0].clientY; pulling = false; }, { passive: true });
-    body.addEventListener('touchmove', function (e) {
+    /* desde el contenido: solo si está arriba del todo y el dedo baja.
+       El «touchmove» que puede frenar el scroll solo se escucha mientras la lista está arriba del todo:
+       en cuanto bajas, el scroll de iOS corre solo, sin esperar a la app (antes esto trababa las listas largas). */
+    var ty = null, pulling = false, tmOn = false;
+    function tm(e) {
       if (ty === null) return;
       var y = e.touches[0].clientY, dy = y - ty;
       if (!pulling) {
-        if (body.scrollTop <= 0 && dy > 10 && !(e.target.closest && e.target.closest('textarea,input[type=range]'))) { pulling = true; start(y); }
+        if (body.scrollTop <= 0 && dy > 10 && e.cancelable && !(e.target.closest && e.target.closest('textarea,input[type=range]'))) { pulling = true; start(y); }
         else if (Math.abs(dy) > 10) { ty = null; return; }
       }
       if (pulling) { e.preventDefault(); move(y); }
-    }, { passive: false });
-    body.addEventListener('touchend', function () { if (pulling) end(); ty = null; pulling = false; });
-    body.addEventListener('touchcancel', function () { if (pulling) end(); ty = null; pulling = false; });
+    }
+    function tmSet(on) {
+      if (on === tmOn) return; tmOn = on;
+      if (on) body.addEventListener('touchmove', tm, { passive: false }); else body.removeEventListener('touchmove', tm, { passive: false });
+    }
+    tmSet(true);
+    body.addEventListener('scroll', function () { if (!pulling) tmSet(body.scrollTop <= 0); }, { passive: true });
+    body.addEventListener('touchstart', function (e) { if (e.touches.length !== 1) return; ty = e.touches[0].clientY; pulling = false; }, { passive: true });
+    body.addEventListener('touchend', function () { if (pulling) end(); ty = null; pulling = false; tmSet(body.scrollTop <= 0); });
+    body.addEventListener('touchcancel', function () { if (pulling) end(); ty = null; pulling = false; tmSet(body.scrollTop <= 0); });
     return api;
   };
   B.topSheet = function () { return stack[stack.length - 1] || null; };
@@ -2700,8 +2723,13 @@ var B = window.B || (window.B = {});
   };
   /* cambio que se puede deshacer: guarda cómo estaban las llaves antes */
   B.undoable = function (msg, keys, fn) {
-    var snap = keys.map(function (k) { return [k, S.has(k) ? S.get(k) : undefined]; });
-    fn();
+    /* solo se recuerda lo que de verdad cambia (sin copiar de antemano planes y registros completos) */
+    var box = {}, chk = navigator.webdriver ? keys.map(function (k) { return [k, JSON.stringify(S.ro(k))]; }) : null;
+    var untrack = S.track(box);
+    try { fn(); } finally { untrack(); }
+    var snap = keys.filter(function (k) { return Object.prototype.hasOwnProperty.call(box, k); }).map(function (k) { return [k, box[k]]; });
+    /* en las pruebas automáticas se verifica que lo recordado sea idéntico a como estaba antes */
+    if (chk) chk.forEach(function (c) { if (Object.prototype.hasOwnProperty.call(box, c[0]) && JSON.stringify(box[c[0]]) !== c[1]) throw new Error('deshacer: «' + c[0] + '» se modificó sin S.set'); });
     B.refresh();
     B.toast(msg, { undo: function () { snap.forEach(function (p) { if (p[1] === undefined) S.del(p[0]); else S.set(p[0], p[1]); }); B.refresh(); } });
   };
@@ -2711,7 +2739,8 @@ var B = window.B || (window.B = {});
     var wrap = h('div.swipe'), del = h('button.del', { type: 'button', 'aria-label': label || 'Eliminar' }, label || 'Eliminar');
     wrap.appendChild(del); wrap.appendChild(row);
     var W = 0, open = false, swallow = false;
-    var sp = new B.Spring(function (x) { row.style.transform = x ? 'translateX(' + x + 'px)' : ''; del.style.opacity = x < -4 ? 1 : 0; }, 0);
+    /* la capa propia (will-change) solo mientras la fila se mueve: muchas capas a la vez hacen lento el scroll en iOS */
+    var sp = new B.Spring(function (x) { row.style.transform = x ? 'translateX(' + x + 'px)' : ''; row.style.willChange = x ? 'transform' : ''; del.style.opacity = x < -4 ? 1 : 0; }, 0);
     del.style.opacity = 0;
     function kill() {
       var hgt = wrap.getBoundingClientRect().height;
@@ -2897,7 +2926,7 @@ var B = window.B || (window.B = {});
    Tus datos de Olympia se guardan con las mismas llaves y la misma forma: nada se convierte ni se pierde.
    Reglas nuevas: la meta del día sale solo de los gramos de tu fase y nada se borra solo. */
 (function () {
-  B.VERSION = '1.1';
+  B.VERSION = '1.2';
   B.screens = B.screens || {};
   B.pages = B.pages || {};
   var MES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -2957,10 +2986,10 @@ var B = window.B || (window.B = {});
   window.macroTarget = function (date) { var g = B.goal(date); return { kcal: g.kcal, prot: g.p, carb: g.c, fat: g.f, manual: false, src: g.src, phase: g.phase }; };
   /* guarda la meta de hoy para que los días pasados conserven la suya */
   B.snapGoal = function () {
-    var g = B.goal(today()), h = S.obj('tgtHist', {}) || {};
+    var g = B.goal(today()), cur = S.ro('tgtHist', {}) || {};
     var n = { kcal: g.kcal, prot: g.p, carb: g.c, fat: g.f, na: g.na, water: g.water, src: 'fase', phase: g.phase };
-    if (h[today()] && JSON.stringify(h[today()]) === JSON.stringify(n)) return;
-    h[today()] = n; S.set('tgtHist', h);
+    if (cur[today()] && JSON.stringify(cur[today()]) === JSON.stringify(n)) return; /* sin cambios: no se copia nada */
+    var h = S.obj('tgtHist', {}) || {}; h[today()] = n; S.set('tgtHist', h);
   };
   B.goalChangedOn = function () {
     var h = S.ro('tgtHist', {}) || {}, ks = Object.keys(h).sort(), cur = h[ks[ks.length - 1]];
@@ -2976,6 +3005,11 @@ var B = window.B || (window.B = {});
   /* la lógica copiada de Olympia (TXT del plan y de consumo) pide la meta con este nombre y esta forma; sin Peak Week (pospuesto) */
   function tgNum(v) { if (v === undefined || v === null || v === '') return null; var n = +v; return isFinite(n) && n >= 0 ? n : null; }
   window.pkResolve = function () { return null; };
+  /* orden alfabético en español: el mismo resultado que localeCompare('es', base, numérico) de Olympia,
+     pero con un solo «Collator» (Safari armaba uno nuevo en cada comparación al ordenar listas) */
+  var COLL = null; try { COLL = new Intl.Collator('es', { sensitivity: 'base', numeric: true }); } catch (e) {}
+  B.cmpEs = function (a, b) { a = String(a == null ? '' : a); b = String(b == null ? '' : b); return COLL ? COLL.compare(a, b) : a.localeCompare(b, 'es', { sensitivity: 'base', numeric: true }); };
+  window._alphaCmp = B.cmpEs;
   window.getEffectiveTargets = function (date, noHist) {
     date = _isD(date) ? date : today(); var t = today(), hist = S.ro('tgtHist', {}) || {};
     var ph = B.activePhase() || {}, g = B.goal(t);
@@ -3703,9 +3737,13 @@ var B = window.B || (window.B = {});
         h('div.main', h('div.ttl', it.name), h('div.sub', 'Porción ' + (u.kind === 'u' ? fmtCount(u.base, u.label) : B.n(u.base, 0) + ' ' + u.label) + ' · P ' + B.n(it.p, 1) + ' · C ' + B.n(it.c, 1) + ' · G ' + B.n(it.f, 1))),
         h('span.val.num', B.kc(foodK(it)) + ' kcal'));
     }
+    var idx = null; /* biblioteca ordenada y con nombres normalizados: se arma una sola vez por hoja */
+    function index() { if (!idx) idx = B.lib().slice().sort(_foodCmp).map(function (it) { return { it: it, n: norm(it.name) }; }); return idx; }
+    var raf = 0;
+    function later() { if (raf) return; raf = requestAnimationFrame(function () { raf = 0; draw(); }); }
     function draw() {
       list.innerHTML = '';
-      var lib = B.lib().filter(function (it) { return !it.off; }).slice().sort(_foodCmp);
+      var all = index(), lib = all.filter(function (x) { return !x.it.off; }).map(function (x) { return x.it; });
       var nq = norm(q);
       if (!nq) {
         var rec = B.recentLib(8);
@@ -3713,13 +3751,13 @@ var B = window.B || (window.B = {});
         list.appendChild(h('div.sec', 'Todos (A–Z)'));
         list.appendChild(lib.length ? h('div.group', lib.map(row)) : h('div.empty', h('b', 'Tu biblioteca está vacía'), 'Agrega alimentos en la biblioteca o usa el registro rápido.'));
       } else {
-        var hits = lib.filter(function (it) { return norm(it.name).indexOf(nq) >= 0; });
-        var off = B.lib().filter(function (it) { return it.off && norm(it.name).indexOf(nq) >= 0; });
+        var hits = all.filter(function (x) { return !x.it.off && x.n.indexOf(nq) >= 0; }).map(function (x) { return x.it; });
+        var off = all.filter(function (x) { return x.it.off && x.n.indexOf(nq) >= 0; });
         list.appendChild(hits.length ? h('div.group', hits.map(row)) : h('div.empty', 'Nada con «' + q + '».'));
         if (off.length) list.appendChild(h('p.t-foot.dim', { style: { margin: '.4rem .3rem' } }, off.length + (off.length === 1 ? ' alimento apagado coincide' : ' alimentos apagados coinciden') + ': actívalos en la biblioteca para usarlos.'));
       }
     }
-    search.addEventListener('input', function () { q = search.value; draw(); });
+    search.addEventListener('input', function () { q = search.value; later(); });
     /* registro rápido */
     var qName = h('input.input', { type: 'text', placeholder: 'Opcional', 'aria-label': 'Nombre' });
     var qp = numIn('Proteína (g)'), qc = numIn('Carbos (g)'), qf = numIn('Grasa (g)'), qk = numIn('kcal');
@@ -3865,26 +3903,36 @@ var B = window.B || (window.B = {});
     var q = '', filt = 'all', list = h('div');
     var search = h('input.input', { type: 'search', placeholder: 'Buscar por nombre o marca', 'aria-label': 'Buscar', autocomplete: 'off' });
     var seg = h('div.seg', [['all', 'Todos'], ['on', 'Activos'], ['off', 'Apagados']].map(function (x) { return h('button', { type: 'button', 'data-f': x[0], 'aria-pressed': x[0] === filt ? 'true' : 'false', onclick: function () { filt = x[0]; Array.prototype.forEach.call(seg.children, function (b) { b.setAttribute('aria-pressed', b.dataset.f === filt ? 'true' : 'false'); }); draw(); } }, x[1]); }));
+    /* la biblioteca se ordena una vez (y otra solo si cambia); buscar solo filtra */
+    var idx = null, idxOf = null;
+    function index() { var L = B.lib(); if (!idx || idxOf !== L) { idxOf = L; idx = L.slice().sort(_foodCmp).map(function (it) { return { it: it, n: norm(it.name) }; }); } return idx; }
+    var raf = 0;
+    function later() { if (raf) return; raf = requestAnimationFrame(function () { raf = 0; draw(); }); }
+    function row(it) {
+      var u = B.libUnit(it);
+      var r = h('div.row.tap' + (it.off ? '.dimmed' : ''), { role: 'button', tabindex: '0', onclick: function () { B.openFoodEdit(B.libByName(it.name) || it, draw); } });
+      var sw = h('button.switch', { type: 'button', role: 'switch', 'aria-checked': it.off ? 'false' : 'true', 'aria-label': (it.off ? 'Activar ' : 'Apagar ') + it.name, onclick: function (e) {
+        e.stopPropagation();
+        /* el interruptor se mueve en su lugar (con su animación); la lista se reordena al buscar, filtrar o volver a abrir */
+        var L2 = S.get('foodLibrary', []), j = L2.findIndex(function (y) { return y.name === it.name; }); if (j < 0) return;
+        var nowOff = !L2[j].off; if (nowOff) L2[j].off = true; else delete L2[j].off;
+        S.set('foodLibrary', L2);
+        sw.setAttribute('aria-checked', nowOff ? 'false' : 'true'); sw.setAttribute('aria-label', (nowOff ? 'Activar ' : 'Apagar ') + it.name);
+        r.classList.toggle('dimmed', nowOff);
+      } });
+      r.appendChild(h('div.main', h('div.ttl', it.name), h('div.sub', (u.kind === 'u' ? fmtCount(u.base, u.label) : B.n(u.base, 0) + ' ' + u.label) + ' · P ' + B.n(it.p, 1) + ' · C ' + B.n(it.c, 1) + ' · G ' + B.n(it.f, 1) + ' · ' + B.kc(foodK(it)) + ' kcal')));
+      r.appendChild(sw);
+      return r;
+    }
     function draw() {
       list.innerHTML = '';
-      var L = B.lib().map(function (it, i) { return { it: it, i: i }; }), nq = norm(q);
-      L = L.filter(function (x) { return (!nq || norm(x.it.name).indexOf(nq) >= 0) && (filt === 'all' || (filt === 'on' ? !x.it.off : !!x.it.off)); });
-      var on = L.filter(function (x) { return !x.it.off; }).sort(function (a, b) { return _foodCmp(a.it, b.it); });
-      var off = L.filter(function (x) { return x.it.off; }).sort(function (a, b) { return _foodCmp(a.it, b.it); });
-      function row(x) {
-        var it = x.it, u = B.libUnit(it);
-        var sw = h('button.switch', { type: 'button', role: 'switch', 'aria-checked': it.off ? 'false' : 'true', 'aria-label': (it.off ? 'Activar ' : 'Apagar ') + it.name, onclick: function (e) {
-          e.stopPropagation(); var L2 = S.get('foodLibrary', []), j = L2.findIndex(function (y) { return y.name === it.name; }); if (j < 0) return;
-          if (L2[j].off) delete L2[j].off; else L2[j].off = true; S.set('foodLibrary', L2); draw();
-        } });
-        return h('div.row.tap', { role: 'button', tabindex: '0', onclick: function () { B.openFoodEdit(it, draw); } },
-          h('div.main', h('div.ttl', it.name), h('div.sub', (u.kind === 'u' ? fmtCount(u.base, u.label) : B.n(u.base, 0) + ' ' + u.label) + ' · P ' + B.n(it.p, 1) + ' · C ' + B.n(it.c, 1) + ' · G ' + B.n(it.f, 1) + ' · ' + B.kc(foodK(it)) + ' kcal')), sw);
-      }
-      if (on.length) list.appendChild(h('div.group', on.map(row)));
-      if (off.length) { list.appendChild(h('div.sec', 'Apagados · no entran a tu plan')); list.appendChild(h('div.group', off.map(row))); }
+      var nq = norm(q), L = index().filter(function (x) { return (!nq || x.n.indexOf(nq) >= 0) && (filt === 'all' || (filt === 'on' ? !x.it.off : !!x.it.off)); });
+      var on = L.filter(function (x) { return !x.it.off; }), off = L.filter(function (x) { return x.it.off; });
+      if (on.length) list.appendChild(h('div.group', on.map(function (x) { return row(x.it); })));
+      if (off.length) { list.appendChild(h('div.sec', 'Apagados · no entran a tu plan')); list.appendChild(h('div.group', off.map(function (x) { return row(x.it); }))); }
       if (!on.length && !off.length) list.appendChild(h('div.empty', nq ? 'Nada con «' + q + '».' : h('span', h('b', 'Sin alimentos'), 'Crea el primero con «Nuevo».')));
     }
-    search.addEventListener('input', function () { q = search.value; draw(); });
+    search.addEventListener('input', function () { q = search.value; later(); });
     B.sheet({ title: 'Mis alimentos', left: { label: 'Cerrar' }, right: { label: 'Nuevo', bold: true, onClick: function () { B.openFoodEdit(null, draw); } },
       body: h('div', search, h('div', { style: { height: '.6rem' } }), seg, list,
         h('div.btn-row', { style: { marginTop: '.4rem' } },
