@@ -2944,7 +2944,7 @@ var B = window.B || (window.B = {});
    Tus datos de Olympia se guardan con las mismas llaves y la misma forma: nada se convierte ni se pierde.
    Reglas nuevas: la meta del día sale solo de los gramos de tu fase y nada se borra solo. */
 (function () {
-  B.VERSION = '1.3';
+  B.VERSION = '1.4';
   B.screens = B.screens || {};
   B.pages = B.pages || {};
   var MES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -3649,7 +3649,8 @@ var B = window.B || (window.B = {});
     window.foodLogDate = date;
     if (date === today()) B.snapGoal();
     v.appendChild(h('div.lt', h('div', h('span.sub', date === today() ? 'Hoy · ' + B.dlong(date) : B.cap(B.dlong(date))), h('h1.t-large', { style: { margin: 0 } }, 'Nutrición')),
-      h('div.lt-act', h('button.icon-btn', { type: 'button', 'aria-label': 'Biblioteca de alimentos', onclick: function () { B.openLibrary(); } }, I('list')))));
+      h('div.lt-act', h('button.icon-btn', { type: 'button', 'aria-label': 'Exportar el día', onclick: function () { B.openDayExport(date); } }, I('share')),
+        h('button.icon-btn', { type: 'button', 'aria-label': 'Biblioteca de alimentos', onclick: function () { B.openLibrary(); } }, I('list')))));
     /* cambiar de día */
     v.appendChild(h('div.seg', { role: 'group', 'aria-label': 'Día' },
       h('button', { type: 'button', 'aria-label': 'Día anterior', onclick: function () { B.nutriDate = addDays(date, -1); B.refresh(); } }, '‹ ' + B.dmon(addDays(date, -1))),
@@ -3688,10 +3689,75 @@ var B = window.B || (window.B = {});
     v.appendChild(h('button.btn.block.plain.new-meal', { type: 'button', onclick: function () { B.newMeal(date, md.meals.map(function (m) { return m.name; }), function (n) { B.openAdd(date, n); }); } }, I('plus'), 'Nueva comida'));
     v.appendChild(B.waterCard(date));
     v.appendChild(h('div.group',
+      h('button.row', { type: 'button', onclick: function () { B.openDayExport(date); } },
+        h('span.ico', { style: { background: 'var(--fill)' } }, I('share')), h('div.main', h('div.ttl', 'Exportar el día (TXT)'), h('div.sub', 'Lo comido y lo pendiente, con tus totales y tu meta')), I('chev', 'chev')),
       h('button.row', { type: 'button', onclick: function () { B.shareTxt('Alimentos disponibles', libraryTxt(), 'alimentos-activos-' + today() + '.txt'); } },
         h('span.ico', { style: { background: 'var(--fill)' } }, I('share')), h('div.main', h('div.ttl', 'Exportar alimentos activos (TXT)'), h('div.sub', 'Para que ChatGPT arme tu plan con lo que tienes')), I('chev', 'chev')),
       h('button.row', { type: 'button', onclick: function () { B.copy(IMPORT_PROMPT); } },
         h('span.ico', { style: { background: 'var(--fill)' } }, I('copy')), h('div.main', h('div.ttl', 'Copiar el prompt del plan'), h('div.sub', 'El formato PLAN OLYMPIA que la app sabe leer')), I('chev', 'chev'))));
+  };
+
+  /* ── exportar el día: lo comido y lo pendiente, por comida, con totales contra tu meta ── */
+  function nf(x, d) { return B.n(x, d === undefined ? 1 : d); }
+  function macT(x) { return 'P ' + nf(x.p) + ' g · C ' + nf(x.c) + ' g · G ' + nf(x.f) + ' g · ' + B.kc(x.k) + ' kcal'; }
+  function add4(a, b) { a.p += +b.p || 0; a.c += +b.c || 0; a.f += +b.f || 0; a.k += +b.k || 0; }
+  B.dayTxt = function (date) {
+    var md = dayModel(date), g = B.goal(date), L = [];
+    var eat = { p: 0, c: 0, f: 0, k: 0 }, pen = { p: 0, c: 0, f: 0, k: 0 }, nEat = 0, nPen = 0;
+    var na = { mg: 0, unk: 0 };
+    function naOf(v) { if (v === null || v === undefined || !isFinite(v)) { na.unk++; return ''; } na.mg += v; return ' · Na ' + nf(v, 0) + ' mg'; }
+    var body = [];
+    md.meals.forEach(function (m) {
+      var me = { p: 0, c: 0, f: 0, k: 0 }, mp = { p: 0, c: 0, f: 0, k: 0 }, lines = [], np = 0;
+      m.items.forEach(function (x) {
+        if (x.log) {
+          var fm = B.foodMac(x.log); add4(me, fm); nEat++;
+          lines.push('[x] ' + x.it.name + ' | ' + qtyOf(x.it) + ' | ' + macT(fm) + naOf(_fNa(x.log)));
+        } else {
+          var im = _itMac(x.it); add4(mp, im); nPen++; np++;
+          var v = _itNa(x.it);
+          lines.push('[ ] ' + x.it.name + ' | ' + qtyOf(x.it) + ' | ' + macT(im) + (v === null ? '' : ' · Na ' + nf(v, 0) + ' mg'));
+        }
+      });
+      m.extra.forEach(function (f) {
+        var fm = B.foodMac(f); add4(me, fm); nEat++;
+        lines.push('[x] ' + f.nombre + (md.plan ? ' | fuera del plan' : '') + ' | ' + macT(fm) + naOf(_fNa(f)));
+      });
+      add4(eat, me); add4(pen, mp);
+      body.push('');
+      body.push(B.mealLabel(m.name).toUpperCase() + ' · comido ' + B.kc(me.k) + ' kcal' + (np ? ' · pendiente ' + B.kc(mp.k) + ' kcal (' + np + ')' : ''));
+      body = body.concat(lines);
+    });
+    var tot = { p: eat.p + pen.p, c: eat.c + pen.c, f: eat.f + pen.f, k: eat.k + pen.k };
+    L.push('NUTRICIÓN DEL DÍA · BRUNT');
+    L.push(B.cap(B.dlong(date)) + (date === today() ? ' (hoy)' : '') + ' · ' + date);
+    if (g.kcal > 0) L.push('Meta' + (g.phase ? ' (' + g.phase + ')' : '') + ': ' + B.kc(g.kcal) + ' kcal · P ' + nf(g.p) + ' g · C ' + nf(g.c) + ' g · G ' + nf(g.f) + ' g' + (g.na ? ' · Na ' + nf(g.na, 0) + ' mg' : ''));
+    else L.push('Meta: sin gramos en tu fase');
+    L.push('');
+    L.push('RESUMEN');
+    L.push('Comido (' + nEat + '): ' + macT(eat));
+    L.push('Pendiente (' + nPen + '): ' + (nPen ? macT(pen) : 'nada'));
+    if (nPen) L.push('Si comes lo pendiente: ' + macT(tot));
+    if (g.kcal > 0) {
+      var rem = { p: g.p - eat.p, c: g.c - eat.c, f: g.f - eat.f, k: g.kcal - eat.k };
+      L.push('Te falta para la meta (con lo comido): ' + ['P ' + nf(rem.p) + ' g', 'C ' + nf(rem.c) + ' g', 'G ' + nf(rem.f) + ' g', B.kc(rem.k) + ' kcal'].join(' · ').replace(/-/g, '−'));
+      if (nPen) { var rt = { p: g.p - tot.p, c: g.c - tot.c, f: g.f - tot.f, k: g.kcal - tot.k }; L.push('Con lo pendiente te faltaría: ' + ['P ' + nf(rt.p) + ' g', 'C ' + nf(rt.c) + ' g', 'G ' + nf(rt.f) + ' g', B.kc(rt.k) + ' kcal'].join(' · ').replace(/-/g, '−') + ' (negativo = te pasas)'); }
+    }
+    var dn = dayNa(date);
+    if (dn.known || dn.unk) L.push('Sodio comido: ' + nf(dn.mg, 0) + ' mg' + (g.na ? ' de ' + nf(g.na, 0) : '') + (dn.unk ? ' (' + dn.unk + ' sin dato)' : ''));
+    L.push('Agua: ' + nf(B.water(date), 0) + ' de ' + nf(B.waterGoal(), 0) + ' ml');
+    if (!md.meals.length) { L.push(''); L.push('Sin alimentos registrados ni plan este día.'); }
+    else { L.push(''); L.push('POR COMIDA · [x] comido · [ ] pendiente'); L = L.concat(body); }
+    return L.join('\n');
+  };
+  B.openDayExport = function (date) {
+    var txt = B.dayTxt(date), fn = 'nutricion-' + date + '.txt';
+    B.sheet({ title: 'Exportar el día', body: h('div',
+      h('p.t-foot.dim', { style: { margin: '0 .2rem .7rem', lineHeight: '1.45' } }, 'Lo comido y lo pendiente de ' + (date === today() ? 'hoy' : B.dlong(date)) + ', por comida y con tus totales. Cópialo para pegárselo a ChatGPT o compártelo como archivo.'),
+      h('div.btn-row', { style: { marginBottom: '.8rem' } },
+        h('button.btn.primary', { type: 'button', onclick: function () { B.copy(txt); } }, I('copy'), 'Copiar'),
+        h('button.btn', { type: 'button', onclick: function () { B.shareTxt('Nutrición del día', txt, fn); } }, I('share'), 'Compartir TXT')),
+      h('pre.perf-rep', txt)) });
   };
 
   function removeFood(f) {
